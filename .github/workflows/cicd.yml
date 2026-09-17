@@ -10,16 +10,14 @@ permissions:
   contents: read
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Code
         uses: actions/checkout@v4
 
-              - name: Debug
+      - name: Debug
         run: |
           echo "repo: ${{ github.repository }}"
           echo "ref: ${{ github.ref }}"
@@ -48,7 +46,3 @@ jobs:
         run: |
           docker push \
           ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
-
-
-
-

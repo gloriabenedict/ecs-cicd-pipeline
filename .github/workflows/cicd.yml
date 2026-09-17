@@ -1,4 +1,4 @@
-name: Build and Push Image 
+name: Build and Deploy to Amazon ECS
 
 on:
   push:
@@ -10,40 +10,45 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Debug
-        run: |
-          echo "repo: ${{ github.repository }}"
-          echo "ref: ${{ github.ref }}"
-          echo "secret set: ${{ secrets.AWS_ROLE_ARN != '' }}"
-
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-          audience: sts.amazonaws.com
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build Docker Image
+      - name: Build, Tag, and Push Docker Image
         run: |
-          docker build -t ${{ vars.ECR_REPOSITORY }} .
+          docker build -t ${{ vars.ECR_REPOSITORY }}:${{ github.sha }} .
+          docker tag ${{ vars.ECR_REPOSITORY }}:${{ github.sha }} ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
 
-      - name: Tag Docker Image
+      - name: Download current task definition
         run: |
-          docker tag ${{ vars.ECR_REPOSITORY }}:latest \
-          ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
+          aws ecs describe-task-definition --task-definition nginx-task \
+          --query taskDefinition > task-def.json
 
-      - name: Push Docker Image
-        run: |
-          docker push \
-          ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
+      - name: Update image in task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-def.json
+          container-name: nginx
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: nginx-service
+          cluster: nginx-ecs-cluster
